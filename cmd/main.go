@@ -2,6 +2,8 @@ package main
 
 import (
 	"log"
+	"os"
+	"os/signal"
 
 	"github.com/joho/godotenv"
 	"github.com/mircearem/storer/api"
@@ -20,5 +22,15 @@ func main() {
 		log.Fatal(err)
 	}
 	server := api.NewServer(db)
-	log.Fatalln(server.Run())
+	go func() {
+		if err := server.Run(); err != nil {
+			log.Fatalln(err)
+		}
+	}()
+	// Handle shutdown gracefully
+	sigch := make(chan os.Signal, 1)
+	signal.Notify(sigch, os.Interrupt)
+	// Close the server
+	sig := <-sigch
+	log.Printf("Received terminate signal: %s, gracefull shutdown", sig)
 }
