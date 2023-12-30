@@ -50,11 +50,11 @@ func (s *Server) handlePostInsert(c echo.Context) error {
 	)
 	var data store.Map
 	if err = json.NewDecoder(c.Request().Body).Decode(&data); err != nil {
-		return err
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 	for k, v := range data {
 		if id, err = s.db.Collection(collname).Put([]byte(k), []byte(v)); err != nil {
-			return err
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
 	}
 	return c.JSON(http.StatusCreated, map[string]uint64{"id": id})
