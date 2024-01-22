@@ -1,7 +1,6 @@
 package store
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -20,7 +19,9 @@ func NewFilter(db *Store, coll string) *Filter {
 func (f *Filter) Put(k []byte, v []byte) (uint64, error) {
 	tx, err := f.store.db.Begin(true)
 	if err != nil {
-		return 0, err
+		msg := fmt.Sprintf("failed to insert key: (%s), with value: (%s), reason: (%s)",
+			string(k), string(v), err.Error())
+		return 0, NewStoreError(ERR_PUT_FAIL_UDEF, msg)
 	}
 	defer tx.Rollback()
 
@@ -28,69 +29,110 @@ func (f *Filter) Put(k []byte, v []byte) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	// Check if the key is already in the db and
-	// return an error if the key is found
 	val := b.Get(k)
 	if val != nil {
-		return 0, fmt.Errorf("key: (%s) is already in the collection", string(k))
+		msg := fmt.Sprintf("key: (%s) already in collection: (%s)", string(k), f.coll)
+		return 0, NewStoreError(ERR_PUT_FAIL_CONF, msg)
 	}
-
 	id, err := b.NextSequence()
 	if err != nil {
-		return 0, err
+		msg := fmt.Sprintf("failed to insert key: (%s), with value: (%s), reason: (%s)",
+			string(k), string(v), err.Error())
+		return 0, NewStoreError(ERR_PUT_FAIL_UDEF, msg)
 	}
 	if err := b.Put(k, v); err != nil {
-		return 0, err
+		msg := fmt.Sprintf("failed to insert key: (%s), with value: (%s), reason: (%s)",
+			string(k), string(v), err.Error())
+		return 0, NewStoreError(ERR_PUT_FAIL_UDEF, msg)
 	}
-	return id, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		msg := fmt.Sprintf("failed to insert key: (%s), with value: (%s), reason: (%s)",
+			string(k), string(v), err.Error())
+		return 0, NewStoreError(ERR_PUT_FAIL_UDEF, msg)
+	}
+	return id, nil
 }
 
 func (f *Filter) Update(k []byte, v []byte) error {
 	tx, err := f.store.db.Begin(true)
 	if err != nil {
-		return err
+		msg := fmt.Sprintf("failed to update key: (%s), with value: (%s), reason: (%s)",
+			string(k), string(v), err.Error())
+		return NewStoreError(ERR_UPD_FAIL_UDEF, msg)
 	}
 	defer tx.Rollback()
 
 	b := tx.Bucket([]byte(f.coll))
 	if b == nil {
-		msg := fmt.Sprintf("collection (%s) does not exist", f.coll)
-		err := errors.New(msg)
-		return err
+		msg := fmt.Sprintf("collection: (%s) does not exist", f.coll)
+		return NewStoreError(ERR_COL_NOT_FOUND, msg)
 	}
-	// Check if the key is already in the db and
-	// return an error if the key is found
 	val := b.Get(k)
 	if val == nil {
-		return fmt.Errorf("key: (%s) is not in collection (%s)", string(k), f.coll)
+		msg := fmt.Sprintf("key: (%s) not in collection: (%s)", string(k), f.coll)
+		return NewStoreError(ERR_UPD_FAIL_NOTF, msg)
 	}
-
 	if err := b.Put(k, v); err != nil {
-		return err
+		msg := fmt.Sprintf("failed to update key: (%s), with value: (%s), reason: (%s)",
+			string(k), string(v), err.Error())
+		return NewStoreError(ERR_UPD_FAIL_UDEF, msg)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		msg := fmt.Sprintf("failed to update key: (%s), with value: (%s), reason: (%s)",
+			string(k), string(v), err.Error())
+		return NewStoreError(ERR_UPD_FAIL_UDEF, msg)
+	}
+	return nil
 }
 
 func (f *Filter) Get(k []byte) ([]byte, error) {
 	tx, err := f.store.db.Begin(false)
 	if err != nil {
-		return nil, err
+		msg := fmt.Sprintf("failed to get value for key: (%s), reason: (%s)",
+			string(k), err.Error())
+		return nil, NewStoreError(ERR_GET_FAIL_UDEF, msg)
 	}
 	b := tx.Bucket([]byte(f.coll))
 	if b == nil {
-		return nil, fmt.Errorf("collection (%s) not found", f.coll)
+		msg := fmt.Sprintf("collection: (%s) does not exist", f.coll)
+		return nil, NewStoreError(ERR_COL_NOT_FOUND, msg)
 	}
-	return b.Get(k), nil
+	bytes := b.Get(k)
+	if bytes == nil {
+		msg := fmt.Sprintf("key: (%s) not in collection: (%s)", string(k), f.coll)
+		return nil, NewStoreError(ERR_GET_FAIL_NOTF, msg)
+
+	}
+	return bytes, nil
 }
 
 func (f *Filter) Delete(k []byte) error {
 	tx, err := f.store.db.Begin(true)
 	if err != nil {
-		return fmt.Errorf("collection %s does not exist", f.coll)
+		msg := fmt.Sprintf("failed to remove key: (%s) from collection: (%s), reason: (%s)",
+			string(k), f.coll, err.Error())
+		return NewStoreError(ERR_DEL_FAIL_UDEF, msg)
 	}
 	b := tx.Bucket([]byte(f.coll))
-	if err := b.Delete([]byte(k)); err != nil {
-		return err
+	if b == nil {
+		msg := fmt.Sprintf("collection: (%s) does not exist", f.coll)
+		return NewStoreError(ERR_COL_NOT_FOUND, msg)
 	}
-	return tx.Commit()
+	bytes := b.Get(k)
+	if bytes == nil {
+		msg := fmt.Sprintf("key: (%s) not in collection: (%s)", string(k), f.coll)
+		return NewStoreError(ERR_DEL_FAIL_NOTF, msg)
+
+	}
+	if err := b.Delete([]byte(k)); err != nil {
+		msg := fmt.Sprintf("failed to remove key: (%s) from collection: (%s), reason: (%s)",
+			string(k), f.coll, err.Error())
+		return NewStoreError(ERR_DEL_FAIL_UDEF, msg)
+	}
+	if err := tx.Commit(); err != nil {
+		msg := fmt.Sprintf("failed to remove key: (%s) from collection: (%s), reason: (%s)",
+			string(k), f.coll, err.Error())
+		return NewStoreError(ERR_DEL_FAIL_UDEF, msg)
+	}
+	return nil
 }

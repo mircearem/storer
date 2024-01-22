@@ -1,9 +1,12 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"os"
 	"os/signal"
+
+	_ "github.com/mircearem/storer/log"
+	"github.com/sirupsen/logrus"
 
 	"github.com/joho/godotenv"
 	"github.com/mircearem/storer/api"
@@ -12,25 +15,31 @@ import (
 
 func init() {
 	if err := godotenv.Load(); err != nil {
-		log.Fatalln("Error loading .env file")
+		logrus.Fatalln("error loading .env file")
 	}
 }
 
 func main() {
-	db, err := store.NewStore(store.WithDBName("app"))
+	storeConfig := store.NewStoreConfig().
+		WithDbName(os.Getenv("DBFILE"))
+	db, err := store.NewStore(storeConfig)
 	if err != nil {
-		log.Fatal(err)
+		logrus.Fatalln(err)
 	}
-	server := api.NewServer(db)
+	storageServer := store.NewStorageServer(*db)
+	apiServer := api.NewApiServer(storageServer)
+
+	// Run the API Server
 	go func() {
-		if err := server.Run(); err != nil {
-			log.Fatalln(err)
+		if err := apiServer.Run(); err != nil {
+			logrus.Fatalln(err)
 		}
 	}()
+
 	// Handle shutdown gracefully
 	sigch := make(chan os.Signal, 1)
 	signal.Notify(sigch, os.Interrupt)
 	// Close the server
 	sig := <-sigch
-	log.Printf("Received terminate signal: %s, gracefull shutdown", sig)
+	logrus.Info(fmt.Printf("received terminate signal: %s, gracefull shutdown\n", sig))
 }
