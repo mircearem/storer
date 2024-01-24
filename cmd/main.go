@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
 	_ "github.com/mircearem/storer/log"
 	"github.com/sirupsen/logrus"
@@ -20,16 +21,16 @@ func init() {
 }
 
 func main() {
-	storeConfig := store.NewStoreConfig().
-		WithDbName(os.Getenv("DBFILE"))
-	db, err := store.NewStore(storeConfig)
+	config := store.NewStoreConfig().
+		WithDbName(os.Getenv("DBFILE")).
+		WithTimeout(2 * time.Second)
+
+	db, err := store.NewStore(config)
 	if err != nil {
 		logrus.Fatalln(err)
 	}
-	storageServer := store.NewStorageServer(*db)
-	apiServer := api.NewApiServer(storageServer)
 
-	// Run the API Server
+	apiServer := api.NewApiServer(db)
 	go func() {
 		if err := apiServer.Run(); err != nil {
 			logrus.Fatalln(err)
@@ -41,5 +42,5 @@ func main() {
 	signal.Notify(sigch, os.Interrupt)
 	// Close the server
 	sig := <-sigch
-	logrus.Info(fmt.Printf("received terminate signal: %s, gracefull shutdown\n", sig))
+	logrus.Info(fmt.Printf("received terminate signal: (%s)\n", sig))
 }

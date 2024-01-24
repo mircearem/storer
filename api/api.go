@@ -8,17 +8,18 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	_ "github.com/mircearem/storer/log"
 	"github.com/mircearem/storer/store"
 	"github.com/sirupsen/logrus"
 )
 
 type ApiServer struct {
-	e       *echo.Echo
-	storage *store.StorageServer
-	errch   chan error
+	e     *echo.Echo
+	db    *store.Store
+	errch chan error
 }
 
-func NewApiServer(storage *store.StorageServer) *ApiServer {
+func NewApiServer(db *store.Store) *ApiServer {
 	log := logrus.New()
 	apiLogger := NewApiLogger(log)
 
@@ -31,53 +32,24 @@ func NewApiServer(storage *store.StorageServer) *ApiServer {
 		c.JSON(http.StatusInternalServerError, store.Map{"error": err.Error()})
 	}
 	return &ApiServer{
-		e:       e,
-		storage: storage,
-		errch:   make(chan error),
+		e:     e,
+		db:    db,
+		errch: make(chan error),
 	}
 }
 
 func (s *ApiServer) Run() error {
-	s.e.POST("/store/:collname", s.handlePostInsert)
 	s.e.GET("/store/:collname", s.handleGetQuery)
-
-	// go s.storage.Run()
+	s.e.POST("/store/:collname", s.handlePostQuery)
+	s.e.DELETE("/store/:collname", s.handleDeleteQuery)
 
 	go func() {
 		port := fmt.Sprintf(":%s", os.Getenv("PORT"))
 		if err := s.e.Start(port); err != nil {
-			close(s.storage.Closech)
 			s.errch <- err
 		}
 	}()
 	return <-s.errch
-}
-
-func (s *ApiServer) handlePostInsert(c echo.Context) error {
-	var (
-		collname = c.Param("collname")
-		err      error
-		id       uint64
-	)
-	var data store.Map
-	if err = json.NewDecoder(c.Request().Body).Decode(&data); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	}
-	for k, v := range data {
-		id, err = s.storage.DB.Collection(collname).Put([]byte(k), []byte(v))
-		if err != nil {
-			dberr := err.(store.StoreError)
-			switch dberr.Type() {
-			// err_put_fail_undefined
-			case store.ERR_PUT_FAIL_UDEF:
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": dberr.Error()})
-			// err_put_fail_conflict
-			case store.ERR_PUT_FAIL_CONF:
-				return c.JSON(http.StatusConflict, map[string]string{"error": dberr.Error()})
-			}
-		}
-	}
-	return c.JSON(http.StatusCreated, map[string]uint64{"id": id})
 }
 
 func (s *ApiServer) handleGetQuery(c echo.Context) error {
@@ -85,11 +57,6 @@ func (s *ApiServer) handleGetQuery(c echo.Context) error {
 		collname = c.Param("collname")
 		err      error
 	)
-	// key := c.QueryParam("key")
-	// if key == "" {
-	// 	msg := "\"key\" query param not present"
-	// 	return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
-	// }
 	var jmap store.Map
 	if err = json.NewDecoder(c.Request().Body).Decode(&jmap); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -99,9 +66,54 @@ func (s *ApiServer) handleGetQuery(c echo.Context) error {
 		msg := "\"key\" tag not present"
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 	}
-	rec, err := s.storage.DB.Collection(collname).Get([]byte(key))
+	rec, err := s.db.Collection(collname).Get([]byte(key))
+	if err != nil {
+		switch err.(store.StoreError).Type() {
+		case store.ERR_COL_NOT_FOUND:
+			return c.JSON(http.StatusNoContent, map[string]string{"error": err.Error()})
+		case store.ERR_GET_FAIL_UDEF:
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		case store.ERR_GET_FAIL_NOTF:
+			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		}
+	}
+	return c.JSON(http.StatusFound, map[string]string{"value": string(rec)})
+}
+
+func (s *ApiServer) handlePostQuery(c echo.Context) error {
+	var (
+		collname = c.Param("collname")
+		err      error
+		id       uint64
+	)
+	var message store.Message
+	if err = json.NewDecoder(c.Request().Body).Decode(&message); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	id, err = s.db.Collection(collname).Set([]byte(message.Key), []byte(message.Value), message.TTL)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]string{"value": string(rec)})
+	return c.JSON(http.StatusCreated, map[string]uint64{"id": id})
+}
+
+func (s *ApiServer) handleDeleteQuery(c echo.Context) error {
+	var (
+		collname = c.Param("collname")
+		err      error
+	)
+	var jmap store.Map
+	if err = json.NewDecoder(c.Request().Body).Decode(&jmap); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	key, ok := jmap["key"]
+	if !ok {
+		msg := "\"key\" tag not present"
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
+	}
+	err = s.db.Collection(collname).Delete([]byte(key))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, nil)
 }
