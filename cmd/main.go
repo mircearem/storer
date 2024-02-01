@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	if err := godotenv.Load(); err != nil {
+	if err := godotenv.Load("/etc/storer/.env"); err != nil {
 		logrus.Fatalln("error loading .env file")
 	}
 }
@@ -42,5 +42,5 @@ func main() {
 	signal.Notify(sigch, os.Interrupt)
 	// Close the server
 	sig := <-sigch
-	logrus.Info(fmt.Printf("received terminate signal: (%s)\n", sig))
+	logrus.Info(fmt.Sprintf("received terminate signal: (%s)", sig))
 }
