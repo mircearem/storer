@@ -70,7 +70,7 @@ func (s *ApiServer) handleGetQuery(c echo.Context) error {
 	if err != nil {
 		switch err.(store.StoreError).Type() {
 		case store.ERR_COL_NOT_FOUND:
-			return c.JSON(http.StatusNoContent, map[string]string{"error": err.Error()})
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		case store.ERR_GET_FAIL_UDEF:
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		case store.ERR_GET_FAIL_NOTF:
